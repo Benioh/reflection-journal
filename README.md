@@ -59,25 +59,6 @@ EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2  # �
 python main.py
 ```
 
-## 嵌入模型选择指南
-
-### Qwen3-Embedding-0.6B（推荐）
-- **优点**：平衡了性能和效率，CPU友好
-- **适用场景**：个人笔记本、普通配置电脑
-- **内存需求**：约2.4GB
-- **推理速度**：CPU约0.5-1秒/次
-
-### Qwen3-Embedding-4B
-- **优点**：更强的语义理解能力
-- **适用场景**：配备GPU的高性能电脑
-- **内存需求**：约16GB
-- **推理速度**：GPU约0.1-0.3秒/次，CPU约3-5秒/次
-
-### 备用轻量模型
-- **优点**：极小的资源占用
-- **适用场景**：配置较低的电脑或Qwen模型加载失败时
-- **内存需求**：约400MB
-- **推理速度**：CPU约0.2-0.5秒/次
 
 ## 获取API密钥
 
@@ -97,13 +78,13 @@ python main.py
 ### Windows打包
 
 ```bash
-python build.py windows
+python build_improved.py windows
 ```
 
 ### macOS打包
 
 ```bash
-python build.py macos
+python build_improved.py macos
 ```
 
 生成的可执行文件在`dist`目录下。
@@ -128,20 +109,7 @@ python build.py macos
 2. 点击"同步到GitHub"备份数据
 3. 在其他设备上点击"从GitHub导入"恢复数据
 
-## 技术栈
 
-- **前端**：Flet (Flutter for Python)
-- **数据库**：SQLite
-- **AI服务**：DeepSeek API
-- **向量搜索**：Qwen3-Embedding / Sentence Transformers
-- **数据同步**：GitHub API
-
-## 系统要求
-
-- Python 3.8+
-- 内存：最低4GB（使用0.6B模型），推荐8GB+
-- 存储：2-10GB（取决于选择的模型）
-- 操作系统：Windows 10+、macOS 10.15+、Linux
 
 ## 注意事项
 
@@ -162,29 +130,3 @@ python build.py macos
 ## License
 
 MIT License 
-
-## 同步策略说明
-
-### 当前同步策略（默认）
-- **完全同步**：包括新增和删除操作都会同步到所有设备
-- **数据备份**：删除的记录会自动备份到 GitHub 的 `deleted_records` 目录
-- **冲突处理**：智能合并，优先保留最新的修改
-
-### 为什么可以安全地同步删除？
-1. **自动备份**：所有删除的记录都会备份到 GitHub
-2. **可恢复性**：可以随时从 `deleted_records` 目录恢复
-3. **版本控制**：GitHub 保留完整的历史记录
-
-### 删除记录的处理
-- 删除的记录会先备份到 GitHub 的 `deleted_records/YYYY-MM/` 目录
-- 备份完成后，删除操作会同步到所有设备
-- 可以在设置页面查看和恢复已删除的记录
-
-### 如果需要禁用删除同步
-如果您希望采用更保守的策略，可以禁用删除同步：
-```python
-# 在 main.py 中修改
-self.sync_manager = SyncManager(Config.DB_PATH, sync_deletions=False)
-```
-
-**注意**：禁用删除同步后，每个设备需要独立管理删除操作。 
