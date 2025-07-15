@@ -31,6 +31,20 @@ class ReflectionJournalApp:
         self.last_text_length = 0
         self.selection_start = -1
         self.selection_end = -1
+    
+    def to_beijing_time(self, dt_str, format_str="%Y-%m-%d %H:%M"):
+        """将时间字符串转换为北京时间显示"""
+        from datetime import timezone, timedelta
+        
+        created_at = datetime.fromisoformat(dt_str)
+        beijing_tz = timezone(timedelta(hours=8))
+        
+        if created_at.tzinfo is None:
+            # 如果没有时区信息，假设是UTC时间
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        
+        beijing_time = created_at.astimezone(beijing_tz)
+        return beijing_time.strftime(format_str)
         
     def main(self, page: ft.Page):
         page.title = "复盘日志 - Reflection Journal"
@@ -38,6 +52,23 @@ class ReflectionJournalApp:
         page.window_height = Config.WINDOW_HEIGHT
         page.theme_mode = Config.THEME_MODE
         page.padding = 0
+        
+        # 设置字体配置，解决中文显示问题
+        page.fonts = {
+            "NotoSansCJK": "/System/Library/Fonts/Supplemental/Arial Unicode MS.ttf",  # macOS
+            "SimHei": "C:\\Windows\\Fonts\\simhei.ttf",  # Windows
+            "WenQuanYi": "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # Linux
+        }
+        
+        # 尝试设置默认字体
+        import platform
+        system = platform.system()
+        if system == "Windows":
+            page.theme = ft.Theme(font_family="Microsoft YaHei")
+        elif system == "Darwin":  # macOS
+            page.theme = ft.Theme(font_family="PingFang SC")
+        else:  # Linux
+            page.theme = ft.Theme(font_family="WenQuanYi Micro Hei")
         
         # 创建UI组件
         self.page = page
@@ -61,6 +92,10 @@ class ReflectionJournalApp:
         # 如果在浏览页面，刷新列表
         if self.current_page == "browse":
             self.show_browse_page()
+        # 编辑页面不要自动刷新，避免打断用户编辑
+        elif self.current_page == "edit":
+            # 只更新同步状态，不切换页面
+            pass
         # 更新同步状态显示
         if hasattr(self, 'sync_status_text'):
             self.update_sync_status()
@@ -442,9 +477,9 @@ class ReflectionJournalApp:
                     # 生成向量
                     embedding = self.ai_service.generate_embedding(content)
                     
-                    # 更新记录
+                    # 更新记录 - 使用新的参数格式
                     self.db.update_reflection(
-                        reflection_id,
+                        id=reflection_id,
                         summary=analysis['summary'],
                         tags=analysis['tags'],
                         category=analysis['category'],
@@ -530,9 +565,8 @@ class ReflectionJournalApp:
     
     def create_reflection_card(self, reflection):
         """创建反思记录卡片"""
-        # 格式化日期
-        created_at = datetime.fromisoformat(reflection['created_at'])
-        date_str = created_at.strftime("%Y-%m-%d %H:%M")
+        # 格式化日期 - 转换为北京时间显示
+        date_str = self.to_beijing_time(reflection['created_at'])
         
         # 保存reflection_id以便后续使用
         reflection_id = reflection['id']
@@ -582,37 +616,50 @@ class ReflectionJournalApp:
         edit_button.on_click = on_edit_click
         delete_button.on_click = on_delete_click
         
-        # 预览内容（保留Markdown格式并渲染）
-        preview_content = reflection['content'][:300] + "..." if len(reflection['content']) > 300 else reflection['content']
-        is_long_content = len(reflection['content']) > 300
+        # 预览内容（保留Markdown格式并渲染）- 降低阈值便于测试
+        content_limit = 100  # 降低到200字符便于触发展开按钮
+        preview_content = reflection['content'][:content_limit] + "..." if len(reflection['content']) > content_limit else reflection['content']
+        is_long_content = len(reflection['content']) > content_limit
         
-        # 创建可展开的内容容器
+        # 调试信息
+        print(f"[DEBUG] 内容长度: {len(reflection['content'])}, 阈值: {content_limit}, 是否显示展开按钮: {is_long_content}")
+        
+        # 创建可展开的内容容器 - 使用正确的溢出处理
+        markdown_widget = ft.Markdown(
+            preview_content,
+            selectable=True,
+            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+            code_theme="github",
+            on_tap_link=lambda e: self.page.launch_url(e.data),
+        )
+        
         content_container = ft.Container(
-            content=ft.Markdown(
-                preview_content,
-                selectable=True,
-                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                code_theme="github",
-                on_tap_link=lambda e: self.page.launch_url(e.data),
-            ),
+            content=markdown_widget,
             height=120,  # 默认限制预览高度
             padding=ft.padding.only(top=8),
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,  # 剪裁溢出的内容
         )
+        
+        # 展开/收起状态标记
+        is_expanded = False
         
         # 展开/收起按钮
         def toggle_content(e):
-            if content_container.height == 120:
+            nonlocal is_expanded
+            if not is_expanded:
                 # 展开：移除高度限制，显示完整内容
                 content_container.height = None
                 content_container.content.value = reflection['content']
                 e.control.text = "收起"
                 e.control.icon = ft.Icons.KEYBOARD_ARROW_UP
+                is_expanded = True
             else:
                 # 收起：恢复高度限制，显示预览内容
                 content_container.height = 120
                 content_container.content.value = preview_content
                 e.control.text = "展开"
                 e.control.icon = ft.Icons.KEYBOARD_ARROW_DOWN
+                is_expanded = False
             self.page.update()
         
         expand_button = ft.TextButton(
@@ -668,11 +715,14 @@ class ReflectionJournalApp:
     
     def show_reflection_detail(self, reflection):
         """显示反思记录详情"""
+        # 转换创建时间为北京时间显示
+        beijing_time_str = self.to_beijing_time(reflection['created_at'], "%Y-%m-%d %H:%M:%S")
+        
         dialog = ft.AlertDialog(
             title=ft.Text("记录详情"),
             content=ft.Container(
                 content=ft.Column([
-                    ft.Text(f"时间: {reflection['created_at']}", size=12),
+                    ft.Text(f"时间: {beijing_time_str} (北京时间)", size=12),
                     ft.Text(f"类型: {reflection['type']}", size=12),
                     ft.Text(f"分类: {reflection['category']}", size=12),
                     ft.Divider(),
@@ -715,6 +765,9 @@ class ReflectionJournalApp:
     
     def show_edit_page(self, reflection):
         """显示编辑页面"""
+        # 设置当前页面状态，防止自动同步时被误切换
+        self.current_page = "edit"
+        
         # 保存正在编辑的记录
         self.editing_reflection = reflection
         
@@ -832,10 +885,10 @@ class ReflectionJournalApp:
                 # 在后台进行AI分析
                 def analyze_and_update():
                     try:
-                        analysis = self.ai_service.analyze_reflection(new_content, new_type)
-                        # 使用AI分析的结果
+                        analysis = self.ai_service.analyze_content(new_content)
+                        # 使用AI分析的结果 - 使用新的参数格式
                         self.db.update_reflection(
-                            reflection['id'],
+                            id=reflection['id'],
                             content=new_content,
                             summary=analysis['summary'],
                             tags=analysis['tags'],
@@ -844,9 +897,9 @@ class ReflectionJournalApp:
                         )
                     except Exception as e:
                         logger.error(f"AI分析失败，使用手动输入: {e}")
-                        # AI分析失败时使用手动输入
+                        # AI分析失败时使用手动输入 - 使用新的参数格式
                         self.db.update_reflection(
-                            reflection['id'],
+                            id=reflection['id'],
                             content=new_content,
                             summary=new_summary,
                             tags=new_tags,
@@ -857,9 +910,9 @@ class ReflectionJournalApp:
                 thread = threading.Thread(target=analyze_and_update)
                 thread.start()
             else:
-                # 不进行AI分析，直接使用手动输入
+                # 不进行AI分析，直接使用手动输入 - 使用新的参数格式
                 self.db.update_reflection(
-                    reflection['id'],
+                    id=reflection['id'],
                     content=new_content,
                     summary=new_summary,
                     tags=new_tags,
@@ -1356,13 +1409,19 @@ class ReflectionJournalApp:
     
     def show_tag_records(self, tag):
         """显示特定标签的所有记录"""
-        # 设置过滤条件
-        self._pending_filter = {'type': 'tag', 'value': tag}
-        
-        # 切换到浏览页面
-        self.nav_rail.selected_index = 1
-        self.show_browse_page()
-        self.show_snackbar(f"显示标签 '{tag}' 的记录")
+        print(f"[DEBUG] 点击标签: {tag}")
+        try:
+            # 设置过滤条件
+            self._pending_filter = {'type': 'tag', 'value': tag}
+            
+            # 切换到浏览页面
+            self.nav_rail.selected_index = 1
+            self.show_browse_page()
+            self.show_snackbar(f"显示标签 '{tag}' 的记录")
+        except Exception as e:
+            print(f"[DEBUG] 标签点击处理出错: {e}")
+            logger.error(f"标签点击处理失败: {e}")
+            self.show_snackbar("标签搜索失败，请重试")
     
     def show_category_records(self, category):
         """显示特定分类的所有记录"""

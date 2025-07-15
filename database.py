@@ -334,29 +334,7 @@ class Database:
         
         return reflections 
     
-    def update_reflection(self, reflection_id, summary, tags, category, embedding):
-        """更新反思记录的AI分析结果"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # 将标签列表转换为JSON字符串
-        tags_json = json.dumps(tags, ensure_ascii=False)
-        
-        # 将numpy数组转换为bytes（如果有的话）
-        embedding_blob = None
-        if embedding is not None:
-            embedding_blob = np.array(embedding).astype(np.float32).tobytes()
-        
-        cursor.execute('''
-            UPDATE reflections 
-            SET summary = ?, tags = ?, category = ?, embedding = ?, updated_at = ?
-            WHERE id = ?
-        ''', (summary, tags_json, category, embedding_blob, datetime.now().isoformat(), reflection_id))
-        
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"更新记录 {reflection_id}: 分类={category}, 标签={tags}")
+
     
     def delete_reflection(self, reflection_id):
         """删除指定的反思记录"""
@@ -387,26 +365,40 @@ class Database:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 使用JSON查询来搜索标签数组
-        cursor.execute('''
-            SELECT * FROM reflections 
-            WHERE json_extract(tags, '$') LIKE ?
-            ORDER BY created_at DESC
-        ''', (f'%"{tag}"%',))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        reflections = []
-        for row in rows:
-            reflection = dict(row)
-            # 解析JSON格式的tags
-            reflection['tags'] = json.loads(reflection['tags']) if reflection['tags'] else []
-            # 不返回embedding以节省内存
-            reflection.pop('embedding', None)
-            reflections.append(reflection)
-        
-        return reflections 
+        try:
+            # 使用更可靠的方法搜索标签
+            cursor.execute('''
+                SELECT * FROM reflections 
+                WHERE tags LIKE ?
+                ORDER BY created_at DESC
+            ''', (f'%"{tag}"%',))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            reflections = []
+            for row in rows:
+                reflection = dict(row)
+                # 解析JSON格式的tags
+                try:
+                    reflection['tags'] = json.loads(reflection['tags']) if reflection['tags'] else []
+                except (json.JSONDecodeError, TypeError):
+                    reflection['tags'] = []
+                
+                # 再次验证标签是否确实包含目标标签（精确匹配）
+                if tag in reflection['tags']:
+                    # 不返回embedding以节省内存
+                    reflection.pop('embedding', None)
+                    reflections.append(reflection)
+            
+            print(f"[DEBUG] 搜索标签 '{tag}' 找到 {len(reflections)} 条记录")
+            return reflections
+            
+        except Exception as e:
+            print(f"[DEBUG] 标签搜索出错: {e}")
+            logger.error(f"标签搜索失败: {e}")
+            conn.close()
+            return [] 
     
     def get_all_reflection_ids(self):
         """获取所有记录的ID列表"""

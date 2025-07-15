@@ -8,6 +8,7 @@ env/
 venv/
 ENV/
 .venv
+*.command
 
 # 环境配置
 .env
