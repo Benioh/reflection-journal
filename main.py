@@ -27,6 +27,11 @@ class ReflectionJournalApp:
         self.backup_thread = threading.Thread(target=self._process_backup_queue, daemon=True)
         self.backup_thread.start()
         
+        # 用于跟踪文本选择状态（模拟）
+        self.last_text_length = 0
+        self.selection_start = -1
+        self.selection_end = -1
+        
     def main(self, page: ft.Page):
         page.title = "复盘日志 - Reflection Journal"
         page.window_width = Config.WINDOW_WIDTH
@@ -47,6 +52,9 @@ class ReflectionJournalApp:
         # 显示同步状态（新增）
         if self.github_sync.is_configured():
             self.show_snackbar("正在同步数据...")
+        
+        # 添加全局键盘事件监听
+        page.on_keyboard_event = self.handle_keyboard_event
 
     def on_sync_complete(self):
         """同步完成后的回调"""
@@ -221,6 +229,34 @@ class ReflectionJournalApp:
             min_lines=10,
             max_lines=20,
             expand=True,
+            on_change=self.update_preview,
+        )
+        
+
+        
+        # Markdown 预览区
+        self.markdown_preview = ft.Markdown(
+            "预览将在这里显示...",
+            selectable=True,
+            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+            code_theme="github",
+            on_tap_link=lambda e: self.page.launch_url(e.data),
+        )
+        
+        self.preview_container = ft.Container(
+            content=self.markdown_preview,
+            bgcolor=ft.Colors.GREY_100,
+            border_radius=10,
+            padding=20,
+            expand=True,
+            visible=False,  # 默认隐藏
+        )
+        
+        # 预览开关
+        self.preview_switch = ft.Switch(
+            label="显示预览",
+            value=False,
+            on_change=self.toggle_preview,
         )
         
         self.type_dropdown = ft.Dropdown(
@@ -240,19 +276,134 @@ class ReflectionJournalApp:
             on_click=self.save_reflection,
         )
         
+
+        
+        # Markdown 帮助提示
+        markdown_help = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=ft.Colors.BLUE_400),
+                    ft.Text(
+                        "支持 Markdown：**粗体** *斜体* `代码` # 标题 - 列表 [链接](url)",
+                        size=12,
+                        color=ft.Colors.BLUE_400,
+                    ),
+                ]),
+                ft.Row([
+                    ft.Icon(ft.Icons.KEYBOARD, size=16, color=ft.Colors.BLUE_400),
+                    ft.Text(
+                        self._get_keyboard_shortcuts_text(),
+                        size=12,
+                        color=ft.Colors.BLUE_400,
+                    ),
+                ]),
+            ], spacing=5),
+            padding=ft.padding.only(top=5),
+        )
+        
+        # 编辑区和预览区的容器
+        self.edit_preview_container = ft.Row(
+            [
+                ft.Container(self.content_input, expand=True),
+                ft.Container(width=10),  # 间隔
+                self.preview_container,
+            ],
+            expand=True,
+        )
+        
         self.content_area.content = ft.Column(
             [
-                ft.Text("写下你的想法", size=24, weight=ft.FontWeight.BOLD),
+                ft.Row([
+                    ft.Text("写下你的想法", size=24, weight=ft.FontWeight.BOLD),
+                    ft.Container(expand=True),
+                    self.preview_switch,
+                ]),
+                markdown_help,
                 ft.Container(height=20),
                 self.type_dropdown,
                 ft.Container(height=10),
-                self.content_input,
+                self.edit_preview_container,
                 ft.Container(height=20),
                 ft.Row([save_button], alignment=ft.MainAxisAlignment.END),
             ],
             expand=True,
         )
         self.page.update()
+    
+    def _get_keyboard_shortcuts_text(self):
+        """获取键盘快捷键提示文本（根据平台）"""
+        import platform
+        is_mac = platform.system() == "Darwin"
+        modifier = "Cmd" if is_mac else "Ctrl"
+        return f"快捷键：{modifier}+B 粗体 | {modifier}+I 斜体"
+    
+    def update_preview(self, e):
+        """更新 Markdown 预览"""
+        if hasattr(self, 'markdown_preview') and self.content_input.value:
+            self.markdown_preview.value = self.content_input.value
+            self.page.update()
+    
+    def toggle_preview(self, e):
+        """切换预览显示"""
+        show_preview = self.preview_switch.value
+        self.preview_container.visible = show_preview
+        
+        if show_preview:
+            # 显示预览时，编辑区和预览区各占一半
+            self.edit_preview_container.controls = [
+                ft.Container(self.content_input, expand=True),
+                ft.Container(width=10),
+                self.preview_container,
+            ]
+            # 更新预览内容
+            if self.content_input.value:
+                self.markdown_preview.value = self.content_input.value
+            else:
+                self.markdown_preview.value = "预览将在这里显示..."
+        else:
+            # 隐藏预览时，编辑区占满
+            self.edit_preview_container.controls = [
+                ft.Container(self.content_input, expand=True),
+            ]
+        
+        self.page.update()
+    
+    def handle_keyboard_event(self, e: ft.KeyboardEvent):
+        """处理全局键盘事件"""
+        # 只在写作页面处理快捷键
+        if self.current_page != "write" or not hasattr(self, 'content_input'):
+            return
+        
+        # 检测平台，Mac 使用 meta（Command），其他平台使用 ctrl
+        import platform
+        is_mac = platform.system() == "Darwin"
+        modifier_pressed = e.meta if is_mac else e.ctrl
+        
+        # Command/Ctrl + B 粗体
+        if modifier_pressed and e.key == "B":
+            self.insert_markdown_format("**", "**", "粗体文本")
+        # Command/Ctrl + I 斜体
+        elif modifier_pressed and e.key == "I":
+            self.insert_markdown_format("*", "*", "斜体文本")
+    
+    def insert_markdown_format(self, prefix, suffix, default_text):
+        """插入 Markdown 格式 - 简单在文本末尾添加格式标记"""
+        if not hasattr(self, 'content_input'):
+            return
+        
+        text = self.content_input.value or ""
+        
+        # 简单地在文本末尾添加格式标记
+        formatted_text = prefix + suffix
+        new_text = text + formatted_text
+        
+        self.content_input.value = new_text
+        if hasattr(self, 'markdown_preview') and self.preview_container.visible:
+            self.markdown_preview.value = new_text
+        self.page.update()
+        self.content_input.focus()
+    
+
     
     def save_reflection(self, e):
         """保存反思记录"""
@@ -431,18 +582,62 @@ class ReflectionJournalApp:
         edit_button.on_click = on_edit_click
         delete_button.on_click = on_delete_click
         
+        # 预览内容（保留Markdown格式并渲染）
+        preview_content = reflection['content'][:300] + "..." if len(reflection['content']) > 300 else reflection['content']
+        is_long_content = len(reflection['content']) > 300
+        
+        # 创建可展开的内容容器
+        content_container = ft.Container(
+            content=ft.Markdown(
+                preview_content,
+                selectable=True,
+                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                code_theme="github",
+                on_tap_link=lambda e: self.page.launch_url(e.data),
+            ),
+            height=120,  # 默认限制预览高度
+            padding=ft.padding.only(top=8),
+        )
+        
+        # 展开/收起按钮
+        def toggle_content(e):
+            if content_container.height == 120:
+                # 展开：移除高度限制，显示完整内容
+                content_container.height = None
+                content_container.content.value = reflection['content']
+                e.control.text = "收起"
+                e.control.icon = ft.Icons.KEYBOARD_ARROW_UP
+            else:
+                # 收起：恢复高度限制，显示预览内容
+                content_container.height = 120
+                content_container.content.value = preview_content
+                e.control.text = "展开"
+                e.control.icon = ft.Icons.KEYBOARD_ARROW_DOWN
+            self.page.update()
+        
+        expand_button = ft.TextButton(
+            "展开",
+            icon=ft.Icons.KEYBOARD_ARROW_DOWN,
+            on_click=toggle_content,
+        ) if is_long_content else None
+        
+        # 构建列内容
+        column_content = [
+            ft.Text(
+                reflection['summary'] or "点击查看详情...",
+                weight=ft.FontWeight.BOLD,
+                size=14,
+            ),
+            content_container,
+        ]
+        
+        if expand_button:
+            column_content.append(expand_button)
+            
+        column_content.append(tags_row)
+        
         card_content = ft.Container(
-            content=ft.Column([
-                ft.Text(
-                    reflection['summary'] or reflection['content'][:100] + "...",
-                    weight=ft.FontWeight.BOLD
-                ),
-                ft.Text(
-                    reflection['content'][:200] + "..." if len(reflection['content']) > 200 else reflection['content'],
-                    size=14,
-                ),
-                tags_row,
-            ]),
+            content=ft.Column(column_content, spacing=8),
             on_click=lambda e: self.show_reflection_detail(reflection),
             padding=ft.padding.only(left=15, right=15, bottom=15),
         )
@@ -481,7 +676,13 @@ class ReflectionJournalApp:
                     ft.Text(f"类型: {reflection['type']}", size=12),
                     ft.Text(f"分类: {reflection['category']}", size=12),
                     ft.Divider(),
-                    ft.Text(reflection['content']),
+                    ft.Markdown(
+                        reflection['content'],
+                        selectable=True,
+                        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                        code_theme="github",
+                        on_tap_link=lambda e: self.page.launch_url(e.data),
+                    ),
                     ft.Divider(),
                     ft.Text(f"摘要: {reflection['summary']}", weight=ft.FontWeight.BOLD),
                     ft.Text(f"标签: {', '.join(reflection['tags'])}", size=12),
@@ -1116,7 +1317,6 @@ class ReflectionJournalApp:
             if direction == "upload":
                 self.show_snackbar("上传成功！")
             elif direction == "download":
-                self.show_snackbar("下载成功！")
                 self.show_browse_page()  # 刷新页面
             else:
                 self.show_snackbar("同步成功！")
