@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# 环境配置
+.env
+.env.local
+
+# 数据文件
+data/
+*.db
+*.db-journal
+
+# 构建输出
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# 日志
+*.log
+
+# 向量模型缓存
+.cache/
+sentence_transformers/
+models/
+
+# 图标文件（可选）
+icon.ico
+icon.icns
+icon.png
+
+# 测试文件
+test_*.py
+
+# 同步状态文件
+.sync_state.json 

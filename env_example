@@ -1,0 +1,15 @@
+# 复盘日志配置文件（可选）
+# 不配置也可以正常使用，以下是可选的增强功能
+
+# AI分析功能（可选）
+# 获取密钥: https://platform.deepseek.com/
+DEEPSEEK_API_KEY=
+
+# GitHub同步（可选）  
+# 用于多设备同步数据
+GITHUB_TOKEN=
+GITHUB_REPO=
+
+# 模型设置（可选）
+# USE_QWEN_MODEL=true        # 是否使用Qwen模型（auto/true/false）
+# MODEL_SOURCE=modelscope    # 模型下载源（modelscope速度快/huggingface）

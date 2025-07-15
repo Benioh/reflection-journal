@@ -1,0 +1,10 @@
+flet
+requests
+PyGithub
+python-dotenv
+sentence-transformers
+transformers
+torch
+numpy
+psutil
+modelscope
